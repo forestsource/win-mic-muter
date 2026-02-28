@@ -1,0 +1,22 @@
+[package]
+name = "muter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tray-icon = "0.21"
+global-hotkey = "0.7"
+notify-rust = "4"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "6"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_UI_WindowsAndMessaging",
+]
