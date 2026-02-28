@@ -66,7 +66,7 @@ fn load_settings() -> Settings {
     }
 }
 
-fn create_icon(muted: bool) -> Icon {
+fn render_icon(muted: bool) -> Icon {
     let size = 32u32;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
     let mic_color: [u8; 4] = if muted {
@@ -127,6 +127,11 @@ fn create_icon(muted: bool) -> Icon {
     Icon::from_rgba(rgba, size, size).unwrap()
 }
 
+struct Icons {
+    unmuted: Icon,
+    muted: Icon,
+}
+
 fn get_mic_endpoint_volume() -> IAudioEndpointVolume {
     unsafe {
         let enumerator: IMMDeviceEnumerator =
@@ -148,18 +153,18 @@ fn toggle_mute(ep: &IAudioEndpointVolume) -> bool {
     }
 }
 
-fn do_toggle(ep: &IAudioEndpointVolume, tray: &TrayIcon) -> bool {
+fn do_toggle(ep: &IAudioEndpointVolume, tray: &TrayIcon, icons: &Icons) {
     let muted = toggle_mute(ep);
-    tray.set_icon(Some(create_icon(muted))).unwrap();
-    let _ = Notification::new()
-        .summary("Muter")
-        .body(if muted {
-            "Microphone Muted"
-        } else {
-            "Microphone Unmuted"
-        })
-        .show();
-    muted
+    let icon = if muted { &icons.muted } else { &icons.unmuted };
+    tray.set_icon(Some(icon.clone())).unwrap();
+    let body = if muted {
+        "Microphone Muted"
+    } else {
+        "Microphone Unmuted"
+    };
+    std::thread::spawn(move || {
+        let _ = Notification::new().summary("Muter").body(body).show();
+    });
 }
 
 fn main() {
@@ -168,16 +173,22 @@ fn main() {
     let endpoint = get_mic_endpoint_volume();
     let muted = unsafe { endpoint.GetMute().unwrap().as_bool() };
 
+    let icons = Icons {
+        unmuted: render_icon(false),
+        muted: render_icon(true),
+    };
+
     let menu = Menu::new();
     let toggle_item = MenuItem::new("Toggle Mute", true, None);
     let quit_item = MenuItem::new("Quit", true, None);
     menu.append(&toggle_item).unwrap();
     menu.append(&quit_item).unwrap();
 
+    let initial_icon = if muted { &icons.muted } else { &icons.unmuted };
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip("Muter")
-        .with_icon(create_icon(muted))
+        .with_icon(initial_icon.clone())
         .build()
         .unwrap();
 
@@ -203,12 +214,12 @@ fn main() {
             if let Ok(ev) = hotkey_rx.try_recv()
                 && ev.state == HotKeyState::Pressed
             {
-                do_toggle(&endpoint, &tray);
+                do_toggle(&endpoint, &tray, &icons);
             }
 
             if let Ok(ev) = menu_rx.try_recv() {
                 if ev.id() == toggle_id {
-                    do_toggle(&endpoint, &tray);
+                    do_toggle(&endpoint, &tray, &icons);
                 } else if ev.id() == quit_id {
                     break;
                 }
