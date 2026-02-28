@@ -1,24 +1,21 @@
 #![windows_subsystem = "windows"]
 
-use global_hotkey::{
-    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
-    hotkey::HotKey,
-};
+use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use notify_rust::Notification;
 use serde::Deserialize;
 use std::fs;
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem},
     Icon, TrayIcon, TrayIconBuilder,
+    menu::{Menu, MenuEvent, MenuItem},
 };
 use windows::Win32::{
     Foundation::BOOL,
     Media::Audio::{
-        eCapture, eConsole, Endpoints::IAudioEndpointVolume, IMMDeviceEnumerator,
-        MMDeviceEnumerator,
+        Endpoints::IAudioEndpointVolume, IMMDeviceEnumerator, MMDeviceEnumerator, eCapture,
+        eConsole,
     },
-    System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED},
-    UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, TranslateMessage, MSG},
+    System::Com::{CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx},
+    UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, MSG, TranslateMessage},
 };
 
 #[derive(Deserialize)]
@@ -37,9 +34,13 @@ fn load_settings() -> Settings {
         .join(".muter")
         .join("settings.toml");
     match fs::read_to_string(&path) {
-        Ok(s) => toml::from_str(&s).unwrap_or(Settings { hotkey: default_hotkey() }),
+        Ok(s) => toml::from_str(&s).unwrap_or(Settings {
+            hotkey: default_hotkey(),
+        }),
         Err(_) => {
-            let settings = Settings { hotkey: default_hotkey() };
+            let settings = Settings {
+                hotkey: default_hotkey(),
+            };
             let content = format!(
                 "# Muter settings\n\
                  #\n\
@@ -89,13 +90,13 @@ fn create_icon(muted: bool) -> Icon {
 
             // Holder arc (U-shape around capsule bottom)
             let arc_dist = ((fx - 16.0).powi(2) + (fy - 12.0).powi(2)).sqrt();
-            let in_holder = fy >= 12.0 && arc_dist >= 5.5 && arc_dist <= 7.5;
+            let in_holder = fy >= 12.0 && (5.5..=7.5).contains(&arc_dist);
 
             // Stand (vertical bar)
-            let in_stand = (fx - 16.0).abs() <= 1.5 && fy >= 19.5 && fy <= 25.0;
+            let in_stand = (fx - 16.0).abs() <= 1.5 && (19.5..=25.0).contains(&fy);
 
             // Base (horizontal bar)
-            let in_base = fx >= 10.0 && fx <= 22.0 && fy >= 25.0 && fy <= 27.0;
+            let in_base = (10.0..=22.0).contains(&fx) && (25.0..=27.0).contains(&fy);
 
             if in_capsule || in_holder || in_stand || in_base {
                 rgba[idx..idx + 4].copy_from_slice(&mic_color);
@@ -130,7 +131,9 @@ fn get_mic_endpoint_volume() -> IAudioEndpointVolume {
     unsafe {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
-        let device = enumerator.GetDefaultAudioEndpoint(eCapture, eConsole).unwrap();
+        let device = enumerator
+            .GetDefaultAudioEndpoint(eCapture, eConsole)
+            .unwrap();
         device.Activate(CLSCTX_ALL, None).unwrap()
     }
 }
@@ -139,7 +142,8 @@ fn toggle_mute(ep: &IAudioEndpointVolume) -> bool {
     unsafe {
         let muted = ep.GetMute().unwrap().as_bool();
         let new_state = !muted;
-        ep.SetMute(BOOL(new_state as i32), std::ptr::null()).unwrap();
+        ep.SetMute(BOOL(new_state as i32), std::ptr::null())
+            .unwrap();
         new_state
     }
 }
@@ -149,7 +153,11 @@ fn do_toggle(ep: &IAudioEndpointVolume, tray: &TrayIcon) -> bool {
     tray.set_icon(Some(create_icon(muted))).unwrap();
     let _ = Notification::new()
         .summary("Muter")
-        .body(if muted { "Microphone Muted" } else { "Microphone Unmuted" })
+        .body(if muted {
+            "Microphone Muted"
+        } else {
+            "Microphone Unmuted"
+        })
         .show();
     muted
 }
@@ -158,7 +166,7 @@ fn main() {
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).unwrap() };
 
     let endpoint = get_mic_endpoint_volume();
-    let mut muted = unsafe { endpoint.GetMute().unwrap().as_bool() };
+    let muted = unsafe { endpoint.GetMute().unwrap().as_bool() };
 
     let menu = Menu::new();
     let toggle_item = MenuItem::new("Toggle Mute", true, None);
@@ -175,7 +183,10 @@ fn main() {
 
     let settings = load_settings();
     let _manager = GlobalHotKeyManager::new().unwrap();
-    let hotkey: HotKey = settings.hotkey.parse().expect("Invalid hotkey in settings.toml");
+    let hotkey: HotKey = settings
+        .hotkey
+        .parse()
+        .expect("Invalid hotkey in settings.toml");
     _manager.register(hotkey).unwrap();
 
     let menu_rx = MenuEvent::receiver();
@@ -189,15 +200,15 @@ fn main() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
 
-            if let Ok(ev) = hotkey_rx.try_recv() {
-                if ev.state == HotKeyState::Pressed {
-                    muted = do_toggle(&endpoint, &tray);
-                }
+            if let Ok(ev) = hotkey_rx.try_recv()
+                && ev.state == HotKeyState::Pressed
+            {
+                do_toggle(&endpoint, &tray);
             }
 
             if let Ok(ev) = menu_rx.try_recv() {
                 if ev.id() == toggle_id {
-                    muted = do_toggle(&endpoint, &tray);
+                    do_toggle(&endpoint, &tray);
                 } else if ev.id() == quit_id {
                     break;
                 }
